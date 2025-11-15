@@ -3,6 +3,7 @@ import time
 from datetime import datetime
 import logging
 from collections import Counter
+from silent_reports import get_user_email, generate_daily_excel, send_email_with_excel
 
 LOG_FOLDER = "logs"
 REPORT_FOLDER = "reports"
@@ -63,8 +64,9 @@ def generate_report(file_path, suspicious_entries):
     except Exception as e:
         logging.error(f"Error writing report for {file_path}: {e}")
 
-def monitor_logs(log_directory, interval=60):
+def monitor_logs(log_directory, interval=60, recipient_email=None, send_daily_email=False):
     while True:
+        all_suspicious_entries = []
         try:
             for filename in os.listdir(log_directory):
                 file_path = os.path.join(log_directory, filename)
@@ -74,13 +76,25 @@ def monitor_logs(log_directory, interval=60):
                     alert_terminal(suspicious_entries)
                     generate_report(file_path, suspicious_entries)
                     update_daily_summary(suspicious_entries)
+                    all_suspicious_entries.extend(suspicious_entries)
                     processed_files.add(file_path)
         except Exception as e:
             logging.error(f"Error monitoring logs: {e}")
+
+        if send_daily_email and all_suspicious_entries and recipient_email:
+            excel_file = generate_daily_excel(all_suspicious_entries)
+            send_email_with_excel(
+                excel_file,
+                recipient_email,
+                sender_email="your_email@gmail.com",
+                sender_password="your_app_password"
+            )
+
         time.sleep(interval)
 
 def main():
     print("Starting Silent Sentinel Log Monitor...")
+    recipient_email = get_user_email()
     for filename in os.listdir(LOG_FOLDER):
         file_path = os.path.join(LOG_FOLDER, filename)
         if os.path.isfile(file_path):
@@ -90,13 +104,7 @@ def main():
             generate_report(file_path, suspicious_entries)
             update_daily_summary(suspicious_entries)
             processed_files.add(file_path)
-    monitor_logs(LOG_FOLDER, interval=60)
+    monitor_logs(LOG_FOLDER, interval=60, recipient_email=recipient_email, send_daily_email=True)
 
 if __name__ == "__main__":
     main()
-
-####Prototype v1.01####
-####TODO: Implement email notification for generated reports ####
-####TODO: Add configuration file support for customizable settings ####
-####TODO: Integrate with a database for storing processed logs and reports ####
-####TODO: Enhance quantum computing detection algorithms ####
