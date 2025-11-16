@@ -6,9 +6,9 @@ from silent_sentinel_lang import _, set_language, get_current_lang, supported_la
 from sentinel_sniffer import NetworkSniffer
 from learning_journal import LearningJournal
 from datetime import datetime
-import threading
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backend_bases import MouseEvent
 import os
 
 journal = LearningJournal("learning_journal.txt")
@@ -16,7 +16,7 @@ journal = LearningJournal("learning_journal.txt")
 class SilentSentinelGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Silent Sentinel 3.1 Beta 2.0")
+        self.root.title("Silent Sentinel 3.1 Live 1.0")
         self.root.geometry("1600x800")
         self.root.configure(bg="#2b2b2b")
         self.logged_in = False
@@ -28,6 +28,7 @@ class SilentSentinelGUI:
         self.packet_count = 0
         self.packet_summary = []
         self.protocol_stats = {}
+        self.protocol_anomalies = {}
 
         # Setup UI
         self.setup_frames()
@@ -132,7 +133,7 @@ class SilentSentinelGUI:
         self.ai_entry.pack(fill=tk.X, padx=5, pady=5)
         self.ai_entry.bind("<Return>", self.send_ai_message)
 
-        # Traffic Trend Graph
+        # Interactive Trend Graph
         self.fig, self.ax = plt.subplots(figsize=(5,3), dpi=100)
         self.ax.set_title("Traffic Trends (Protocol Counts)")
         self.ax.set_xlabel("Protocol")
@@ -140,6 +141,8 @@ class SilentSentinelGUI:
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.right_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.protocol_stats = {}
+        self.protocol_anomalies = {}
+        self.canvas.mpl_connect("motion_notify_event", self.on_hover)
 
         # Sniffer
         self.sniffer = NetworkSniffer(callback=self.process_packet)
@@ -156,7 +159,7 @@ class SilentSentinelGUI:
         # Insert into Treeview & auto-scroll
         anomaly_str = "YES" if anomaly else "NO"
         self.tree.insert("", tk.END, values=(timestamp, src, dst, proto, port, anomaly_str))
-        self.tree.yview_moveto(1.0)  # auto-scroll
+        self.tree.yview_moveto(1.0)
 
         # Track packets
         self.packet_count += 1
@@ -164,6 +167,8 @@ class SilentSentinelGUI:
 
         # Update protocol stats
         self.protocol_stats[proto] = self.protocol_stats.get(proto, 0) + 1
+        if anomaly:
+            self.protocol_anomalies[proto] = self.protocol_anomalies.get(proto, 0) + 1
         self.update_graph()
 
         # Immediate anomaly alerts
@@ -179,9 +184,10 @@ class SilentSentinelGUI:
             journal.record(f"AI summary: {summary_msg}")
             self.packet_summary = []
 
-        # Scan system files in legal scope
+        # Legal system scan
         self.ai_system_scan(pkt)
 
+    # -------------------- Summary --------------------
     def generate_summary(self, packets):
         total = len(packets)
         anomalies = [p for p in packets if p.get("anomaly")]
@@ -189,7 +195,6 @@ class SilentSentinelGUI:
         for p in packets:
             proto = p.get("proto", "UNKNOWN")
             protocols[proto] = protocols.get(proto, 0) + 1
-
         summary = f"Processed {total} packets. {len(anomalies)} anomalies detected. "
         summary += "Traffic breakdown: " + ", ".join([f"{k}: {v}" for k,v in protocols.items()]) + "."
         return summary
@@ -197,17 +202,27 @@ class SilentSentinelGUI:
     # -------------------- Trend Graph --------------------
     def update_graph(self):
         self.ax.clear()
-        self.ax.bar(self.protocol_stats.keys(), self.protocol_stats.values(), color="cyan")
+        bars = self.ax.bar(self.protocol_stats.keys(), self.protocol_stats.values(), color="cyan")
         self.ax.set_title("Traffic Trends (Protocol Counts)")
         self.ax.set_xlabel("Protocol")
         self.ax.set_ylabel("Count")
         self.canvas.draw()
+        self.bars = bars  # store bars for hover info
+
+    def on_hover(self, event: MouseEvent):
+        if event.inaxes != self.ax: return
+        for bar in getattr(self, 'bars', []):
+            if bar.contains(event)[0]:
+                proto = bar.get_x() + bar.get_width()/2
+                count = int(bar.get_height())
+                anomaly_count = self.protocol_anomalies.get(bar.get_x(), 0)
+                self.log_ai(f"[Hover Info] Protocol: {bar.get_x()}, Count: {count}, Anomalies: {anomaly_count}")
+                break
 
     # -------------------- AI Interaction --------------------
     def send_ai_message(self, event):
         msg = self.ai_entry.get().strip()
-        if not msg:
-            return
+        if not msg: return
         self.log_ai(f"[User] {msg}")
         journal.record(f"AI learning input: {msg}")
         response = self.ai_suggest(msg)
@@ -215,7 +230,6 @@ class SilentSentinelGUI:
         self.ai_entry.delete(0, tk.END)
 
     def ai_suggest(self, user_input):
-        # Smarter suggestions
         keywords = {
             "anomaly": "Check unusual traffic patterns and potential port scans.",
             "port scan": "Recommend blocking suspicious IPs or throttling connections.",
@@ -230,18 +244,17 @@ class SilentSentinelGUI:
 
     def log_ai(self, msg):
         self.ai_text.insert(tk.END, f"{msg}\n")
-        self.ai_text.see(tk.END)  # auto-scroll
+        self.ai_text.see(tk.END)
 
     # -------------------- System Scan --------------------
     def ai_system_scan(self, pkt):
-        # Example legal scope scan: check for common config files or logs
         monitored_paths = ["C:\\Windows\\System32\\drivers\\etc", os.path.expanduser("~\\Documents")]
         findings = []
         for path in monitored_paths:
             if os.path.exists(path):
                 files = os.listdir(path)
                 if files:
-                    findings.append(f"{path} has {len(files)} items")
+                    findings.append(f"{path} files: {', '.join(files[:5])}" + ("..." if len(files) > 5 else ""))
         if findings:
             self.log_ai(f"[AI System Scan] {', '.join(findings)}")
             journal.record(f"System scan: {', '.join(findings)}")
