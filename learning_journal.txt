@@ -2116,3 +2116,7 @@
 [2025-11-15 23:47:00] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: /: 200.
 [2025-11-15 23:47:16] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: /: 192, >: 8.
 [2025-11-15 23:47:26] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: /: 200.
+[2025-11-15 23:47:34] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: /: 200.
+[2025-11-15 23:47:42] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: /: 200.
+[2025-11-15 23:47:49] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: /: 200.
+[2025-11-15 23:47:58] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: /: 200.
