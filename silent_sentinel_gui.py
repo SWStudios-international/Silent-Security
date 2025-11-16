@@ -6,14 +6,18 @@ from silent_sentinel_lang import _, set_language, get_current_lang, supported_la
 from sentinel_sniffer import NetworkSniffer
 from learning_journal import LearningJournal
 from datetime import datetime
+import threading
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import os
 
 journal = LearningJournal("learning_journal.txt")
 
 class SilentSentinelGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Silent Sentinel 3.1 Beta 1.5")
-        self.root.geometry("1300x750")
+        self.root.title("Silent Sentinel 3.1 Beta 2.0")
+        self.root.geometry("1600x800")
         self.root.configure(bg="#2b2b2b")
         self.logged_in = False
         self.user = None
@@ -23,22 +27,19 @@ class SilentSentinelGUI:
         # Packet tracking
         self.packet_count = 0
         self.packet_summary = []
+        self.protocol_stats = {}
 
-        # Setup frames and logo
+        # Setup UI
         self.setup_frames()
         self.load_logo()
-
-        # Login screen
         self.show_login_screen()
-
-        # Tooltip support
         self.tooltip = None
 
     # -------------------- UI Setup --------------------
     def setup_frames(self):
         self.left_frame = tk.Frame(self.root, bg="#2b2b2b")
         self.left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.right_frame = tk.Frame(self.root, bg="#1e1e1e", width=400)
+        self.right_frame = tk.Frame(self.root, bg="#1e1e1e", width=500)
         self.right_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Menu bar
@@ -125,11 +126,20 @@ class SilentSentinelGUI:
 
         # AI Prediction Console
         tk.Label(self.right_frame, text="AI Prediction Console", fg="white", bg="#1e1e1e", font=("Arial", 12, "bold")).pack(pady=5)
-        self.ai_text = tk.Text(self.right_frame, bg="#2b2b2b", fg="white", height=35)
+        self.ai_text = tk.Text(self.right_frame, bg="#2b2b2b", fg="white", height=20)
         self.ai_text.pack(padx=5, pady=5, fill=tk.BOTH, expand=True)
         self.ai_entry = tk.Entry(self.right_frame, bg="#1e1e1e", fg="white")
         self.ai_entry.pack(fill=tk.X, padx=5, pady=5)
         self.ai_entry.bind("<Return>", self.send_ai_message)
+
+        # Traffic Trend Graph
+        self.fig, self.ax = plt.subplots(figsize=(5,3), dpi=100)
+        self.ax.set_title("Traffic Trends (Protocol Counts)")
+        self.ax.set_xlabel("Protocol")
+        self.ax.set_ylabel("Count")
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.right_frame)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.protocol_stats = {}
 
         # Sniffer
         self.sniffer = NetworkSniffer(callback=self.process_packet)
@@ -139,30 +149,38 @@ class SilentSentinelGUI:
         timestamp = datetime.now().strftime("%H:%M:%S")
         src = pkt.get("src", "")
         dst = pkt.get("dst", "")
-        proto = pkt.get("proto", "")
+        proto = pkt.get("proto", "UNKNOWN")
         port = pkt.get("port", "")
         anomaly = pkt.get("anomaly", False)
 
-        # Insert into Treeview
+        # Insert into Treeview & auto-scroll
         anomaly_str = "YES" if anomaly else "NO"
         self.tree.insert("", tk.END, values=(timestamp, src, dst, proto, port, anomaly_str))
+        self.tree.yview_moveto(1.0)  # auto-scroll
 
         # Track packets
         self.packet_count += 1
         self.packet_summary.append(pkt)
 
-        # Immediate alert for anomalies
+        # Update protocol stats
+        self.protocol_stats[proto] = self.protocol_stats.get(proto, 0) + 1
+        self.update_graph()
+
+        # Immediate anomaly alerts
         if anomaly:
             suggestion = f"Check port {port} from {src} immediately!"
             self.log_ai(f"[AI] {suggestion}")
             journal.record(f"AI suggestion: {suggestion}")
 
-        # Generate summary every 200 packets
+        # Summary every 200 packets
         if self.packet_count % 200 == 0:
             summary_msg = self.generate_summary(self.packet_summary)
             self.log_ai(f"[AI Summary] {summary_msg}")
             journal.record(f"AI summary: {summary_msg}")
             self.packet_summary = []
+
+        # Scan system files in legal scope
+        self.ai_system_scan(pkt)
 
     def generate_summary(self, packets):
         total = len(packets)
@@ -172,10 +190,18 @@ class SilentSentinelGUI:
             proto = p.get("proto", "UNKNOWN")
             protocols[proto] = protocols.get(proto, 0) + 1
 
-        summary = f"Processed {total} packets. "
-        summary += f"{len(anomalies)} anomalies detected. "
+        summary = f"Processed {total} packets. {len(anomalies)} anomalies detected. "
         summary += "Traffic breakdown: " + ", ".join([f"{k}: {v}" for k,v in protocols.items()]) + "."
         return summary
+
+    # -------------------- Trend Graph --------------------
+    def update_graph(self):
+        self.ax.clear()
+        self.ax.bar(self.protocol_stats.keys(), self.protocol_stats.values(), color="cyan")
+        self.ax.set_title("Traffic Trends (Protocol Counts)")
+        self.ax.set_xlabel("Protocol")
+        self.ax.set_ylabel("Count")
+        self.canvas.draw()
 
     # -------------------- AI Interaction --------------------
     def send_ai_message(self, event):
@@ -189,22 +215,36 @@ class SilentSentinelGUI:
         self.ai_entry.delete(0, tk.END)
 
     def ai_suggest(self, user_input):
-        # Smarter suggestions: adaptive and predictive
+        # Smarter suggestions
         keywords = {
-            "anomaly": "Consider checking unusual traffic patterns and potential port scans.",
-            "port scan": "Recommend blocking suspicious IP addresses or throttling connections.",
-            "ddos": "Suggest enabling rate limiting on the firewall and alerting the network team.",
-            "ssh": "Monitor SSH login attempts; unusual spikes may indicate brute force attacks.",
-            "http": "Check for unusual HTTP request rates that could indicate scraping or bot activity."
+            "anomaly": "Check unusual traffic patterns and potential port scans.",
+            "port scan": "Recommend blocking suspicious IPs or throttling connections.",
+            "ddos": "Enable rate limiting and alert the network team.",
+            "ssh": "Monitor SSH login attempts; spikes may indicate brute force attacks.",
+            "http": "Check for unusual HTTP request rates indicating bots."
         }
         for key, suggestion in keywords.items():
             if key in user_input.lower():
                 return suggestion
-        return "Understood. Monitoring traffic trends for insights."
+        return "Monitoring traffic trends and scanning system integrity."
 
     def log_ai(self, msg):
         self.ai_text.insert(tk.END, f"{msg}\n")
-        self.ai_text.see(tk.END)
+        self.ai_text.see(tk.END)  # auto-scroll
+
+    # -------------------- System Scan --------------------
+    def ai_system_scan(self, pkt):
+        # Example legal scope scan: check for common config files or logs
+        monitored_paths = ["C:\\Windows\\System32\\drivers\\etc", os.path.expanduser("~\\Documents")]
+        findings = []
+        for path in monitored_paths:
+            if os.path.exists(path):
+                files = os.listdir(path)
+                if files:
+                    findings.append(f"{path} has {len(files)} items")
+        if findings:
+            self.log_ai(f"[AI System Scan] {', '.join(findings)}")
+            journal.record(f"System scan: {', '.join(findings)}")
 
     # -------------------- Control --------------------
     def start_monitoring(self):
@@ -246,7 +286,6 @@ class SilentSentinelGUI:
     def change_language(self, code):
         set_language(code)
         self.lang_var.set(code)
-        # Note: AI messages are in English for now; translation integration can be added if desired
         self.update_ui_texts()
 
     def update_ui_texts(self):
