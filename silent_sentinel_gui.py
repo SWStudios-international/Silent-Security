@@ -5,23 +5,25 @@ from sentinel_core import start_sentinel, stop_sentinel
 from silent_sentinel_lang import _, set_language, get_current_lang, supported_languages
 from sentinel_sniffer import NetworkSniffer
 from learning_journal import LearningJournal
-from datetime import datetime
+from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.backend_bases import MouseEvent
+import matplotlib.ticker as mtick
 import os
+import threading
 
+# -------------------- Journal --------------------
 journal = LearningJournal("learning_journal.txt")
 
+# -------------------- GUI Class --------------------
 class SilentSentinelGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Silent Sentinel 3.1 Live 1.0")
+        self.root.title("Silent Sentinel 3.1 Live 2.0")
         self.root.geometry("1600x800")
         self.root.configure(bg="#2b2b2b")
         self.logged_in = False
         self.user = None
-
         self.lang_var = tk.StringVar(value=get_current_lang())
 
         # Packet tracking
@@ -29,12 +31,19 @@ class SilentSentinelGUI:
         self.packet_summary = []
         self.protocol_stats = {}
         self.protocol_anomalies = {}
+        self.last_scan_time = datetime.now() - timedelta(minutes=5)
 
-        # Setup UI
+        # Tooltip
+        self.hover_tooltip = None
+
+        # -------------------- Setup --------------------
+        self.open_settings  # make sure method exists
         self.setup_frames()
         self.load_logo()
         self.show_login_screen()
-        self.tooltip = None
+
+        # Sniffer
+        self.sniffer = NetworkSniffer(callback=self.process_packet)
 
     # -------------------- UI Setup --------------------
     def setup_frames(self):
@@ -63,6 +72,7 @@ class SilentSentinelGUI:
             self.lang_menu.add_command(label=name, command=lambda c=code: self.change_language(c))
         self.menu_bar.add_cascade(label="Language", menu=self.lang_menu)
 
+    # -------------------- Logo --------------------
     def load_logo(self):
         logo = Image.open("silent_sentinel.png").resize((150, 150))
         self.logo_img = ImageTk.PhotoImage(logo)
@@ -138,14 +148,10 @@ class SilentSentinelGUI:
         self.ax.set_title("Traffic Trends (Protocol Counts)")
         self.ax.set_xlabel("Protocol")
         self.ax.set_ylabel("Count")
+        self.ax.yaxis.set_major_locator(mtick.MaxNLocator(integer=True))
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.right_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self.protocol_stats = {}
-        self.protocol_anomalies = {}
         self.canvas.mpl_connect("motion_notify_event", self.on_hover)
-
-        # Sniffer
-        self.sniffer = NetworkSniffer(callback=self.process_packet)
 
     # -------------------- Packet Handling --------------------
     def process_packet(self, pkt):
@@ -156,36 +162,34 @@ class SilentSentinelGUI:
         port = pkt.get("port", "")
         anomaly = pkt.get("anomaly", False)
 
-        # Insert into Treeview & auto-scroll
         anomaly_str = "YES" if anomaly else "NO"
         self.tree.insert("", tk.END, values=(timestamp, src, dst, proto, port, anomaly_str))
         self.tree.yview_moveto(1.0)
 
-        # Track packets
         self.packet_count += 1
         self.packet_summary.append(pkt)
 
-        # Update protocol stats
         self.protocol_stats[proto] = self.protocol_stats.get(proto, 0) + 1
         if anomaly:
             self.protocol_anomalies[proto] = self.protocol_anomalies.get(proto, 0) + 1
+
         self.update_graph()
 
-        # Immediate anomaly alerts
         if anomaly:
             suggestion = f"Check port {port} from {src} immediately!"
             self.log_ai(f"[AI] {suggestion}")
             journal.record(f"AI suggestion: {suggestion}")
 
-        # Summary every 200 packets
         if self.packet_count % 200 == 0:
             summary_msg = self.generate_summary(self.packet_summary)
             self.log_ai(f"[AI Summary] {summary_msg}")
             journal.record(f"AI summary: {summary_msg}")
             self.packet_summary = []
 
-        # Legal system scan
-        self.ai_system_scan(pkt)
+        # Only scan every 5 minutes
+        if datetime.now() - self.last_scan_time > timedelta(minutes=5):
+            threading.Thread(target=self.ai_system_scan, daemon=True).start()
+            self.last_scan_time = datetime.now()
 
     # -------------------- Summary --------------------
     def generate_summary(self, packets):
@@ -207,17 +211,28 @@ class SilentSentinelGUI:
         self.ax.set_xlabel("Protocol")
         self.ax.set_ylabel("Count")
         self.canvas.draw()
-        self.bars = bars  # store bars for hover info
+        self.bars = bars
 
-    def on_hover(self, event: MouseEvent):
+    def on_hover(self, event):
         if event.inaxes != self.ax: return
         for bar in getattr(self, 'bars', []):
             if bar.contains(event)[0]:
-                proto = bar.get_x() + bar.get_width()/2
+                proto = list(self.protocol_stats.keys())[list(self.bars).index(bar)]
                 count = int(bar.get_height())
-                anomaly_count = self.protocol_anomalies.get(bar.get_x(), 0)
-                self.log_ai(f"[Hover Info] Protocol: {bar.get_x()}, Count: {count}, Anomalies: {anomaly_count}")
+                anomaly_count = self.protocol_anomalies.get(proto, 0)
+                tooltip_text = f"Protocol: {proto}\nCount: {count}\nAnomalies: {anomaly_count}"
+                self.show_hover_tooltip(event, tooltip_text)
                 break
+
+    def show_hover_tooltip(self, event, text):
+        if self.hover_tooltip:
+            self.hover_tooltip.destroy()
+        x, y = event.x, event.y
+        self.hover_tooltip = tk.Toplevel(self.root)
+        self.hover_tooltip.wm_overrideredirect(True)
+        self.hover_tooltip.geometry(f"+{int(self.root.winfo_rootx() + x + 10)}+{int(self.root.winfo_rooty() + y + 10)}")
+        tk.Label(self.hover_tooltip, text=text, bg="#ffffe0", fg="black", font=("Arial", 10)).pack()
+        self.root.after(1500, self.hover_tooltip.destroy)
 
     # -------------------- AI Interaction --------------------
     def send_ai_message(self, event):
@@ -247,14 +262,22 @@ class SilentSentinelGUI:
         self.ai_text.see(tk.END)
 
     # -------------------- System Scan --------------------
-    def ai_system_scan(self, pkt):
-        monitored_paths = ["C:\\Windows\\System32\\drivers\\etc", os.path.expanduser("~\\Documents")]
+    def ai_system_scan(self):
+        monitored_paths = [
+            os.path.expanduser("~\\Documents"),
+            "C:\\Windows",
+            "C:\\Program Files",
+            "C:\\Program Files (x86)"
+        ]
         findings = []
         for path in monitored_paths:
             if os.path.exists(path):
-                files = os.listdir(path)
-                if files:
-                    findings.append(f"{path} files: {', '.join(files[:5])}" + ("..." if len(files) > 5 else ""))
+                try:
+                    files = os.listdir(path)
+                    if files:
+                        findings.append(f"{path} files: {', '.join(files[:5])}" + ("..." if len(files) > 5 else ""))
+                except PermissionError:
+                    findings.append(f"{path} - Permission Denied")
         if findings:
             self.log_ai(f"[AI System Scan] {', '.join(findings)}")
             journal.record(f"System scan: {', '.join(findings)}")
@@ -328,6 +351,7 @@ class SilentSentinelGUI:
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
 
+# -------------------- Run GUI --------------------
 if __name__ == "__main__":
     root = tk.Tk()
     gui = SilentSentinelGUI(root)
