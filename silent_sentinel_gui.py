@@ -1,262 +1,282 @@
 import tkinter as tk
-from tkinter import messagebox, colorchooser
+from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
-import random
-import json
-import os
+from sentinel_core import start_sentinel, stop_sentinel
+from silent_sentinel_lang import _, set_language, get_current_lang, supported_languages
+from sentinel_sniffer import NetworkSniffer
+from learning_journal import LearningJournal
+from datetime import datetime
 
-# --- Main Window ---
-root = tk.Tk()
-root.title("Silent Sentinel")
-root.geometry("400x500")
-root.resizable(False, False)
+journal = LearningJournal("learning_journal.txt")
 
-CREDENTIALS_FILE = "credentials.json"
+class SilentSentinelGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Silent Sentinel 3.1 Beta 1.5")
+        self.root.geometry("1300x750")
+        self.root.configure(bg="#2b2b2b")
+        self.logged_in = False
+        self.user = None
 
-# --- Themes ---
-dark_theme = {"bg": "#0d0d0d", "fg": "#39ff14", "entry_bg": "#1a1a1a",
-              "btn_bg": "#111111", "btn_fg": "#39ff14", "panel_bg": "#0a0a0a"}
-light_theme = {"bg": "#f0f0f0", "fg": "#0d0d0d", "entry_bg": "#ffffff",
-               "btn_bg": "#dddddd", "btn_fg": "#0d0d0d", "panel_bg": "#e0e0e0"}
-theme = dark_theme
+        self.lang_var = tk.StringVar(value=get_current_lang())
 
-# --- Helper Functions ---
-def save_credentials(users):
-    with open(CREDENTIALS_FILE, "w") as f:
-        json.dump(users, f)
+        # Packet tracking
+        self.packet_count = 0
+        self.packet_summary = []
 
-def load_credentials():
-    if os.path.exists(CREDENTIALS_FILE):
-        with open(CREDENTIALS_FILE, "r") as f:
-            return json.load(f)
-    return {}
+        # Setup frames and logo
+        self.setup_frames()
+        self.load_logo()
 
-# --- Hover glow ---
-def on_enter(e):
-    e.widget.config(bg="#39ff14", fg="#0d0d0d")
+        # Login screen
+        self.show_login_screen()
 
-def on_leave(e):
-    e.widget.config(bg=theme["btn_bg"], fg=theme["btn_fg"])
+        # Tooltip support
+        self.tooltip = None
 
-# --- Logging ---
-def log(message):
-    output_text.config(state="normal")
-    output_text.insert(tk.END, message + "\n")
-    output_text.see(tk.END)
-    output_text.config(state="disabled")
+    # -------------------- UI Setup --------------------
+    def setup_frames(self):
+        self.left_frame = tk.Frame(self.root, bg="#2b2b2b")
+        self.left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.right_frame = tk.Frame(self.root, bg="#1e1e1e", width=400)
+        self.right_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
-# --- Load logo ---
-image = Image.open("silent_sentinel.png")
-image = image.resize((250, 250), Image.Resampling.LANCZOS)
-photo = ImageTk.PhotoImage(image)
+        # Menu bar
+        self.menu_bar = tk.Menu(self.root)
+        self.root.config(menu=self.menu_bar)
 
-# --- Frames ---
-frames = {}
-for name in ["login", "register", "monitor", "dashboard", "settings"]:
-    f = tk.Frame(root, bg=theme["bg"])
-    f.place(x=0, y=0, relwidth=1, relheight=1)
-    frames[name] = f
+        # File menu
+        self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.file_menu.add_command(label=_("exit"), command=self.root.quit)
+        self.menu_bar.add_cascade(label=_("exit"), menu=self.file_menu)
 
-# --- Theme apply ---
-def apply_theme(widget_list):
-    for widget in widget_list:
-        if isinstance(widget, tk.Label):
-            widget.config(bg=theme["bg"], fg=theme["fg"])
-        elif isinstance(widget, tk.Entry):
-            widget.config(bg=theme["entry_bg"], fg=theme["fg"], insertbackground=theme["fg"])
-        elif isinstance(widget, tk.Button):
-            widget.config(bg=theme["btn_bg"], fg=theme["btn_fg"],
-                          activebackground=theme["btn_bg"], activeforeground=theme["btn_fg"])
-    root.config(bg=theme["bg"])
+        # Settings menu
+        self.settings_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.settings_menu.add_command(label=_("settings"), command=self.open_settings)
+        self.menu_bar.add_cascade(label=_("settings"), menu=self.settings_menu)
 
-# --- Matrix Animation ---
-matrix_text = "SILENT SENTINEL"
-matrix_drops = [random.randint(0, 20) for _ in range(40)]
+        # Language menu
+        self.lang_menu = tk.Menu(self.menu_bar, tearoff=0)
+        for code, name in supported_languages():
+            self.lang_menu.add_command(label=name, command=lambda c=code: self.change_language(c))
+        self.menu_bar.add_cascade(label="Language", menu=self.lang_menu)
 
-def animate_matrix(canvas, drops):
-    canvas.delete("all")
-    # Circuit overlays
-    for _ in range(12):
-        x1, y1 = random.randint(0, 400), random.randint(0, 500)
-        x2, y2 = x1 + random.randint(20, 50), y1 + random.randint(0, 20)
-        pulse = random.randint(100, 255)
-        canvas.create_line(x1, y1, x2, y2, fill=f"#00{pulse:02x}99", width=1)
-    # Falling letters
-    for i in range(len(drops)):
-        char = matrix_text[i % len(matrix_text)]
-        if random.random() < 0.05:
-            char = random.choice("!@#$%^&*")
-        x = i * 10
-        y = drops[i] * 15
-        canvas.create_text(x, y, text=char, fill="#39ff14", font=("Courier", 10, "bold"))
-        drops[i] = (drops[i] + 1) % 35
-    # Glitch effect
-    if random.random() < 0.02:
-        canvas.create_rectangle(0, 0, 400, 500, fill="#00ff33", outline="")
-    canvas.after(100, animate_matrix, canvas, drops)
+    def load_logo(self):
+        logo = Image.open("silent_sentinel.png").resize((150, 150))
+        self.logo_img = ImageTk.PhotoImage(logo)
 
-# --- Login Frame ---
-login_frame = frames["login"]
+    # -------------------- Login --------------------
+    def show_login_screen(self):
+        self.login_frame = tk.Frame(self.left_frame, bg="#2b2b2b")
+        self.login_frame.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        tk.Label(self.login_frame, image=self.logo_img, bg="#2b2b2b").pack(pady=20)
+        tk.Label(self.login_frame, text=_("login"), fg="white", bg="#2b2b2b", font=("Arial", 14)).pack(pady=5)
+        self.username_entry = tk.Entry(self.login_frame)
+        self.username_entry.pack(pady=5)
+        tk.Label(self.login_frame, text=_("password"), fg="white", bg="#2b2b2b", font=("Arial", 14)).pack(pady=5)
+        self.password_entry = tk.Entry(self.login_frame, show="*")
+        self.password_entry.pack(pady=5)
 
-tk.Label(login_frame, image=photo, bg=theme["bg"]).pack(pady=(20, 10))
-tk.Label(login_frame, text="Username:", font=("Courier", 12), bg=theme["bg"], fg=theme["fg"]).pack()
-username_entry = tk.Entry(login_frame, font=("Courier", 12), bg=theme["entry_bg"], fg=theme["fg"],
-                          insertbackground=theme["fg"], relief="solid", bd=2)
-username_entry.pack(pady=(0,5))
-tk.Label(login_frame, text="Password:", font=("Courier", 12), bg=theme["bg"], fg=theme["fg"]).pack()
-password_entry = tk.Entry(login_frame, font=("Courier", 12), bg=theme["entry_bg"], fg=theme["fg"],
-                          show="*", insertbackground=theme["fg"], relief="solid", bd=2)
-password_entry.pack(pady=(0,10))
-error_label = tk.Label(login_frame, text="", font=("Courier", 10), bg=theme["bg"], fg="red")
-error_label.pack(pady=(0,10))
+        btn_frame = tk.Frame(self.login_frame, bg="#2b2b2b")
+        btn_frame.pack(pady=10)
+        login_btn = tk.Button(btn_frame, text=_("login"), command=self.login)
+        login_btn.pack(side=tk.LEFT, padx=5)
+        self.create_tooltip(login_btn, "Login with your credentials.")
+        register_btn = tk.Button(btn_frame, text=_("register"), command=self.register)
+        register_btn.pack(side=tk.LEFT, padx=5)
+        self.create_tooltip(register_btn, "Register a new user account.")
 
-# Buttons container
-btn_container = tk.Frame(login_frame, bg=theme["bg"])
-btn_container.pack(pady=5, fill="x")
-login_btn = tk.Button(btn_container, text="Login", font=("Courier", 12, "bold"),
-                      command=lambda: authenticate_user(), bg=theme["btn_bg"], fg=theme["btn_fg"], bd=4, relief="raised")
-login_btn.pack(fill="x", pady=(0,5))
-login_btn.bind("<Enter>", on_enter)
-login_btn.bind("<Leave>", on_leave)
+    def login(self):
+        username = self.username_entry.get()
+        password = self.password_entry.get()
+        if username and password:
+            self.logged_in = True
+            self.user = username
+            self.login_frame.destroy()
+            self.show_monitoring_screen()
+        else:
+            messagebox.showwarning(_("error"), _("please_enter_credentials"))
 
-register_btn = tk.Button(btn_container, text="Register New Account", font=("Courier", 10),
-                         bg=theme["btn_bg"], fg=theme["btn_fg"], bd=3, relief="raised",
-                         command=lambda: frames["register"].tkraise())
-register_btn.pack(fill="x")
-register_btn.bind("<Enter>", on_enter)
-register_btn.bind("<Leave>", on_leave)
+    def register(self):
+        messagebox.showinfo(_("register"), _("register"))
 
-# --- Register Frame ---
-register_frame = frames["register"]
-tk.Label(register_frame, text="Register New Account", font=("Courier", 14, "bold"),
-         bg=theme["bg"], fg=theme["fg"]).pack(pady=20)
-reg_username = tk.Entry(register_frame, font=("Courier", 12), bg=theme["entry_bg"], fg=theme["fg"])
-reg_username.pack(pady=5)
-reg_password = tk.Entry(register_frame, font=("Courier", 12), bg=theme["entry_bg"], fg=theme["fg"], show="*")
-reg_password.pack(pady=5)
-reg_error = tk.Label(register_frame, text="", font=("Courier", 10), bg=theme["bg"], fg="red")
-reg_error.pack(pady=5)
+    # -------------------- Monitoring --------------------
+    def show_monitoring_screen(self):
+        # Packet Treeview
+        cols = ("Time", "Src", "Dst", "Protocol", "Port", "Anomaly")
+        self.tree = ttk.Treeview(self.left_frame, columns=cols, show="headings")
+        for col in cols:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=120 if col != "Time" else 140)
+        self.tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-tk.Button(register_frame, text="Register", font=("Courier", 12, "bold"),
-          bg=theme["btn_bg"], fg=theme["btn_fg"], bd=4, relief="raised",
-          command=lambda: register_user()).pack(pady=10)
-tk.Button(register_frame, text="Back to Login", font=("Courier", 12, "bold"),
-          bg=theme["btn_bg"], fg=theme["btn_fg"], bd=4, relief="raised",
-          command=lambda: frames["login"].tkraise()).pack(pady=5)
+        # Buttons
+        btn_frame = tk.Frame(self.left_frame, bg="#2b2b2b")
+        btn_frame.pack(pady=5)
+        self.start_btn = tk.Button(btn_frame, text=_("start_monitoring"), command=self.start_monitoring)
+        self.start_btn.pack(side=tk.LEFT, padx=5)
+        self.create_tooltip(self.start_btn, "Start monitoring network traffic and log packets.")
+        self.stop_btn = tk.Button(btn_frame, text=_("stop_monitoring"), command=self.stop_monitoring, state=tk.DISABLED)
+        self.stop_btn.pack(side=tk.LEFT, padx=5)
+        self.create_tooltip(self.stop_btn, "Stop monitoring network traffic.")
+        self.bootstrap_btn = tk.Button(btn_frame, text=_("bootstrap"), command=self.bootstrap)
+        self.bootstrap_btn.pack(side=tk.LEFT, padx=5)
+        self.create_tooltip(self.bootstrap_btn, "Initialize system modules and AI learning.")
 
-# --- Functions ---
-def authenticate_user():
-    username = username_entry.get().strip()
-    password = password_entry.get().strip()
-    users = load_credentials()
-    if username == "admin" and password == "matrix":
-        frames["monitor"].tkraise()
-        return
-    if username in users and users[username] == password:
-        frames["monitor"].tkraise()
-    else:
-        error_label.config(text="Invalid credentials!")
+        # AI Prediction Console
+        tk.Label(self.right_frame, text="AI Prediction Console", fg="white", bg="#1e1e1e", font=("Arial", 12, "bold")).pack(pady=5)
+        self.ai_text = tk.Text(self.right_frame, bg="#2b2b2b", fg="white", height=35)
+        self.ai_text.pack(padx=5, pady=5, fill=tk.BOTH, expand=True)
+        self.ai_entry = tk.Entry(self.right_frame, bg="#1e1e1e", fg="white")
+        self.ai_entry.pack(fill=tk.X, padx=5, pady=5)
+        self.ai_entry.bind("<Return>", self.send_ai_message)
 
-def register_user():
-    username = reg_username.get().strip()
-    password = reg_password.get().strip()
-    if not username or not password:
-        reg_error.config(text="Fill in all fields!")
-        return
-    users = load_credentials()
-    if username in users:
-        reg_error.config(text="Username already exists!")
-        return
-    users[username] = password
-    save_credentials(users)
-    reg_error.config(fg="green", text="Account created!")
-    root.after(1000, lambda: frames["login"].tkraise())
+        # Sniffer
+        self.sniffer = NetworkSniffer(callback=self.process_packet)
 
-# --- Monitor Frame ---
-monitor_frame = frames["monitor"]
-tk.Label(monitor_frame, image=photo, bg=theme["bg"]).pack(pady=20)
-tk.Button(monitor_frame, text="Start Monitoring", font=("Courier", 12, "bold"),
-          bg=theme["btn_bg"], fg=theme["btn_fg"], bd=4, relief="raised",
-          command=lambda: frames["dashboard"].tkraise()).pack(pady=50)
+    # -------------------- Packet Handling --------------------
+    def process_packet(self, pkt):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        src = pkt.get("src", "")
+        dst = pkt.get("dst", "")
+        proto = pkt.get("proto", "")
+        port = pkt.get("port", "")
+        anomaly = pkt.get("anomaly", False)
 
-# --- Dashboard Frame ---
-dashboard_frame = frames["dashboard"]
-dashboard_canvas = tk.Canvas(dashboard_frame, width=400, height=500, bg=theme["bg"], highlightthickness=0)
-dashboard_canvas.place(x=0, y=0, relwidth=1, relheight=1)
-animate_matrix(dashboard_canvas, matrix_drops)
+        # Insert into Treeview
+        anomaly_str = "YES" if anomaly else "NO"
+        self.tree.insert("", tk.END, values=(timestamp, src, dst, proto, port, anomaly_str))
 
-# Output panel
-output_frame = tk.Frame(dashboard_frame, bg=theme["panel_bg"], bd=3, relief="groove")
-output_frame.place(x=20, y=200, width=360, height=200)
-output_text = tk.Text(output_frame, bg="#0d0d0d", fg="#39ff14", font=("Courier", 10),
-                      state="disabled", bd=0)
-output_text.pack(fill="both", expand=True)
-scrollbar = tk.Scrollbar(output_frame)
-scrollbar.pack(side="right", fill="y")
-output_text.config(yscrollcommand=scrollbar.set)
-scrollbar.config(command=output_text.yview)
+        # Track packets
+        self.packet_count += 1
+        self.packet_summary.append(pkt)
 
-# Dashboard Buttons
-button_frame = tk.Frame(dashboard_frame, bg=theme["bg"])
-button_frame.place(x=0, y=420, relwidth=1, height=50)
+        # Immediate alert for anomalies
+        if anomaly:
+            suggestion = f"Check port {port} from {src} immediately!"
+            self.log_ai(f"[AI] {suggestion}")
+            journal.record(f"AI suggestion: {suggestion}")
 
-def start_monitoring():
-    log("Monitoring started...")
-    messagebox.showinfo("Monitoring", "Monitoring started!")
+        # Generate summary every 200 packets
+        if self.packet_count % 200 == 0:
+            summary_msg = self.generate_summary(self.packet_summary)
+            self.log_ai(f"[AI Summary] {summary_msg}")
+            journal.record(f"AI summary: {summary_msg}")
+            self.packet_summary = []
 
-def view_logs():
-    log("Logs displayed.")
-    messagebox.showinfo("Logs", "Displaying logs...")
+    def generate_summary(self, packets):
+        total = len(packets)
+        anomalies = [p for p in packets if p.get("anomaly")]
+        protocols = {}
+        for p in packets:
+            proto = p.get("proto", "UNKNOWN")
+            protocols[proto] = protocols.get(proto, 0) + 1
 
-def open_settings():
-    frames["settings"].tkraise()
+        summary = f"Processed {total} packets. "
+        summary += f"{len(anomalies)} anomalies detected. "
+        summary += "Traffic breakdown: " + ", ".join([f"{k}: {v}" for k,v in protocols.items()]) + "."
+        return summary
 
-def save_settings():
-    user = username_entry.get().strip()
-    pwd = password_entry.get().strip()
-    save_credentials({user: pwd})
-    messagebox.showinfo("Settings", "Credentials saved!")
+    # -------------------- AI Interaction --------------------
+    def send_ai_message(self, event):
+        msg = self.ai_entry.get().strip()
+        if not msg:
+            return
+        self.log_ai(f"[User] {msg}")
+        journal.record(f"AI learning input: {msg}")
+        response = self.ai_suggest(msg)
+        self.log_ai(f"[AI] {response}")
+        self.ai_entry.delete(0, tk.END)
 
-buttons_info = [
-    ("Start Monitoring", start_monitoring),
-    ("View Logs", view_logs),
-    ("Settings", open_settings),
-    ("Exit", root.quit)
-]
+    def ai_suggest(self, user_input):
+        # Smarter suggestions: adaptive and predictive
+        keywords = {
+            "anomaly": "Consider checking unusual traffic patterns and potential port scans.",
+            "port scan": "Recommend blocking suspicious IP addresses or throttling connections.",
+            "ddos": "Suggest enabling rate limiting on the firewall and alerting the network team.",
+            "ssh": "Monitor SSH login attempts; unusual spikes may indicate brute force attacks.",
+            "http": "Check for unusual HTTP request rates that could indicate scraping or bot activity."
+        }
+        for key, suggestion in keywords.items():
+            if key in user_input.lower():
+                return suggestion
+        return "Understood. Monitoring traffic trends for insights."
 
-for text, cmd in buttons_info:
-    btn = tk.Button(button_frame, text=text, font=("Courier", 10, "bold"),
-                    bg=theme["btn_bg"], fg=theme["btn_fg"], bd=4, relief="raised", command=cmd)
-    btn.pack(side="left", expand=True, fill="both", padx=5, pady=5)
-    btn.bind("<Enter>", on_enter)
-    btn.bind("<Leave>", on_leave)
+    def log_ai(self, msg):
+        self.ai_text.insert(tk.END, f"{msg}\n")
+        self.ai_text.see(tk.END)
 
-# --- Settings Frame ---
-settings_frame = frames["settings"]
-tk.Label(settings_frame, text="Settings Panel", font=("Courier", 14, "bold"),
-         bg=theme["bg"], fg=theme["fg"]).pack(pady=20)
-save_btn = tk.Button(settings_frame, text="Save Credentials", font=("Courier", 12, "bold"),
-                     bg=theme["btn_bg"], fg=theme["btn_fg"], bd=4, relief="raised", command=save_settings)
-save_btn.pack(pady=10)
-save_btn.bind("<Enter>", on_enter)
-save_btn.bind("<Leave>", on_leave)
-tk.Button(settings_frame, text="Back to Dashboard", font=("Courier", 12, "bold"),
-          bg=theme["btn_bg"], fg=theme["btn_fg"], bd=4, relief="raised",
-          command=lambda: frames["dashboard"].tkraise()).pack(pady=10)
+    # -------------------- Control --------------------
+    def start_monitoring(self):
+        self.bootstrap()
+        self.sniffer.start()
+        self.start_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
+        self.log_ai("[System] Monitoring started.")
 
-# --- Theme Toggle ---
-def toggle_theme():
-    global theme
-    theme = light_theme if theme == dark_theme else dark_theme
-    apply_theme(root.winfo_children())
+    def stop_monitoring(self):
+        self.sniffer.stop()
+        self.start_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+        self.log_ai("[System] Monitoring stopped.")
 
-theme_btn = tk.Button(root, text="Toggle Dark/Light Mode", font=("Courier", 10),
-                      command=toggle_theme, bg=theme["btn_bg"], fg=theme["btn_fg"], bd=4, relief="raised")
-theme_btn.place(x=120, y=470)
-theme_btn.bind("<Enter>", on_enter)
-theme_btn.bind("<Leave>", on_leave)
+    def bootstrap(self):
+        self.log_ai("[System] Bootstrap complete.")
+        journal.record("Bootstrap performed.")
 
-# --- Start ---
-frames["login"].tkraise()
-apply_theme(root.winfo_children())
-root.mainloop()
+    # -------------------- Settings --------------------
+    def open_settings(self):
+        if hasattr(self, "settings_win") and self.settings_win.winfo_exists():
+            self.settings_win.lift()
+            return
+        self.settings_win = tk.Toplevel(self.root)
+        self.settings_win.title(_("settings"))
+        self.settings_win.geometry("400x400")
+        self.settings_win.configure(bg="#2b2b2b")
+        tk.Label(self.settings_win, text=_("Select Theme:"), bg="#2b2b2b", fg="white").pack(pady=5)
+        theme_var = tk.StringVar(value="dark")
+        tk.OptionMenu(self.settings_win, theme_var, "dark", "light").pack()
+        tk.Label(self.settings_win, text=_("Select Language:"), bg="#2b2b2b", fg="white").pack(pady=5)
+        lang_var = tk.StringVar(value=get_current_lang())
+        menu = tk.OptionMenu(self.settings_win, lang_var, *[name for _, name in supported_languages()],
+                             command=lambda v: self.change_language(self.lang_code_from_name(v)))
+        menu.pack(pady=5)
+        tk.Button(self.settings_win, text=_("settings"), command=self.settings_win.destroy).pack(pady=20)
+
+    def change_language(self, code):
+        set_language(code)
+        self.lang_var.set(code)
+        # Note: AI messages are in English for now; translation integration can be added if desired
+        self.update_ui_texts()
+
+    def update_ui_texts(self):
+        self.start_btn.config(text=_("start_monitoring"))
+        self.stop_btn.config(text=_("stop_monitoring"))
+        self.bootstrap_btn.config(text=_("bootstrap"))
+
+    def lang_code_from_name(self, name):
+        for code, n in supported_languages():
+            if n == name:
+                return code
+        return "en"
+
+    # -------------------- Tooltip --------------------
+    def create_tooltip(self, widget, text):
+        def enter(event):
+            if hasattr(self, 'tooltip') and self.tooltip:
+                self.tooltip.destroy()
+            self.tooltip = tk.Toplevel(self.root)
+            self.tooltip.wm_overrideredirect(True)
+            self.tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+            tk.Label(self.tooltip, text=text, bg="#ffffe0", fg="black", font=("Arial", 10)).pack()
+        def leave(event):
+            if hasattr(self, 'tooltip') and self.tooltip:
+                self.tooltip.destroy()
+                self.tooltip = None
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    gui = SilentSentinelGUI(root)
+    root.mainloop()
