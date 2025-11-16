@@ -1,0 +1,28 @@
+{
+  "log_folder": "logs",
+  "report_folder": "reports",
+  "email_notifications": {
+    "enabled": true,
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 465,
+    "username": "your_email@gmail.com",
+    "password": "your_app_password",
+    "recipient": "recipient_email@example.com"
+  },
+  "suspicious_patterns": [
+    "malware",
+    "phishing",
+    "ransomware",
+    "failed login",
+    "unauthorized access",
+    "error",
+    "quantum computing",
+    "QKD",
+    "entanglement"
+  ],
+  "database_integration": {
+    "enabled": false,
+    "db_type": "sqlite",
+    "connection_string": "sqlite:///silent_reports.db"
+  }
+}

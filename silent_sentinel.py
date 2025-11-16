@@ -1,22 +1,20 @@
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from collections import Counter
-from silent_reports import get_user_email, generate_daily_excel, send_email_with_excel
+from silent_reports import generate_daily_excel, send_email_with_excel, get_recipient_email
 
 LOG_FOLDER = "logs"
 REPORT_FOLDER = "reports"
 SUSPICIOUS_PATTERNS = ["malware", "phishing", "ransomware", "failed login", "unauthorized access", "error"]
 
 os.makedirs(REPORT_FOLDER, exist_ok=True)
+os.makedirs(LOG_FOLDER, exist_ok=True)
 processed_files = set()
 
-logging.basicConfig(
-    filename=os.path.join(LOG_FOLDER, 'silent_sentinel.log'),
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+log_file = os.path.join(LOG_FOLDER, 'silent_sentinel.log')
+logging.basicConfig(filename=log_file, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def scan_log_file(file_path):
     suspicious_entries = []
@@ -32,21 +30,11 @@ def scan_log_file(file_path):
     return suspicious_entries
 
 def alert_terminal(suspicious_entries):
-    if not suspicious_entries:
-        return
-    print("\n\033[91m=== Suspicious Activity Detected ===\033[0m")
-    entry_counts = Counter(suspicious_entries)
-    for entry, count in entry_counts.items():
-        print(f"{entry} - Occurrences: {count}")
-    print("\033[91m====================================\033[0m\n")
-
-def update_daily_summary(suspicious_entries):
-    if not suspicious_entries:
-        return
-    summary_file = os.path.join(REPORT_FOLDER, "daily_summary.txt")
-    with open(summary_file, "a") as f:
+    if suspicious_entries:
+        print("\nSuspicious Entries Detected:")
         for entry in suspicious_entries:
-            f.write(f"{datetime.now()}: {entry}\n")
+            print(f"- {entry}")
+        print()
 
 def generate_report(file_path, suspicious_entries):
     if not suspicious_entries:
@@ -57,54 +45,53 @@ def generate_report(file_path, suspicious_entries):
         with open(report_file, 'w') as report:
             report.write(f"Suspicious Activity Report for {file_path}\n")
             report.write(f"Generated on: {datetime.now()}\n\n")
-            report.write("Entry Occurrences:\n")
             for entry, count in entry_counts.items():
                 report.write(f"{entry} - Occurrences: {count}\n")
         logging.info(f"Report generated: {report_file}")
     except Exception as e:
         logging.error(f"Error writing report for {file_path}: {e}")
 
-def monitor_logs(log_directory, interval=60, recipient_email=None, send_daily_email=False):
+def monitor_logs(interval=60):
+    last_email_time = datetime.min
+    daily_entries = []
+    recipient_email = get_recipient_email()
+
     while True:
-        all_suspicious_entries = []
+        new_entries = []
         try:
-            for filename in os.listdir(log_directory):
-                file_path = os.path.join(log_directory, filename)
+            for filename in os.listdir(LOG_FOLDER):
+                file_path = os.path.join(LOG_FOLDER, filename)
                 if file_path not in processed_files and os.path.isfile(file_path):
                     logging.info(f"Scanning log file: {file_path}")
-                    suspicious_entries = scan_log_file(file_path)
-                    alert_terminal(suspicious_entries)
-                    generate_report(file_path, suspicious_entries)
-                    update_daily_summary(suspicious_entries)
-                    all_suspicious_entries.extend(suspicious_entries)
+                    entries = scan_log_file(file_path)
+                    alert_terminal(entries)
+                    generate_report(file_path, entries)
+                    new_entries.extend(entries)
                     processed_files.add(file_path)
         except Exception as e:
             logging.error(f"Error monitoring logs: {e}")
 
-        if send_daily_email and all_suspicious_entries and recipient_email:
-            excel_file = generate_daily_excel(all_suspicious_entries)
-            send_email_with_excel(
-                excel_file,
-                recipient_email,
-                sender_email="your_email@gmail.com",
-                sender_password="your_app_password"
-            )
+        daily_entries.extend(new_entries)
+
+        now = datetime.now()
+        if daily_entries and (now - last_email_time >= timedelta(days=1)):
+            excel_file = generate_daily_excel(daily_entries)
+            send_email_with_excel(excel_file)
+            daily_entries.clear()
+            last_email_time = now
 
         time.sleep(interval)
 
 def main():
     print("Starting Silent Sentinel Log Monitor...")
-    recipient_email = get_user_email()
-    for filename in os.listdir(LOG_FOLDER):
-        file_path = os.path.join(LOG_FOLDER, filename)
-        if os.path.isfile(file_path):
-            logging.info(f"Initial scan of log file: {file_path}")
-            suspicious_entries = scan_log_file(file_path)
-            alert_terminal(suspicious_entries)
-            generate_report(file_path, suspicious_entries)
-            update_daily_summary(suspicious_entries)
-            processed_files.add(file_path)
-    monitor_logs(LOG_FOLDER, interval=60, recipient_email=recipient_email, send_daily_email=True)
+    monitor_logs(interval=60)
 
 if __name__ == "__main__":
     main()
+
+####Prototype v1.04####
+####TODO: DONE: Implement email notification for generated reports####
+####TODO: DONE: Add configuration file support for customizable settings####
+####TODO: Integrate with a database for storing processed logs and reports####
+####TODO: Enhance quantum computing detection algorithms####
+####TODO: Implement GUI for streamlining user interaction####
