@@ -1,0 +1,9 @@
+[2025-11-16 14:39:42] Bootstrap performed.
+[2025-11-16 14:39:42] System scan: C:\Users\steve\Documents files: My Music, My Pictures, My Videos, swres.pdf, C:\Windows files: addins, appcompat, apppatch, AppReadiness, assembly..., C:\Program Files files: Application Verifier, Common Files, CPUID, desktop.ini, Diablo II..., C:\Program Files (x86) files: Adobe, Application Verifier, Battle.net, Common Files, desktop.ini...
+[2025-11-16 14:39:54] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: UNKNOWN: 1, /: 199.
+[2025-11-16 16:32:29] Bootstrap performed.
+[2025-11-16 16:32:29] System scan: C:\Users\steve\Documents files: My Music, My Pictures, My Videos, swres.pdf, C:\Windows files: addins, appcompat, apppatch, AppReadiness, assembly..., C:\Program Files files: Application Verifier, Common Files, CPUID, desktop.ini, Diablo II..., C:\Program Files (x86) files: Adobe, Application Verifier, Battle.net, Common Files, desktop.ini...
+[2025-11-16 16:32:42] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: UNKNOWN: 1, /: 199.
+[2025-11-16 16:32:55] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: /: 200.
+[2025-11-16 16:33:01] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: /: 200.
+[2025-11-16 16:33:08] AI summary: Processed 200 packets. 0 anomalies detected. Traffic breakdown: /: 200.
